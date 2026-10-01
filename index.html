@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="グリッド確認">
+<meta name="theme-color" content="#000000">
+<title>グリッドプレビュー</title>
+<style>
+:root{
+  --bg:#000; --fg:#f5f5f5; --muted:#a8a8a8; --panel:#1c1c1e; --panel2:#2c2c30; --panel3:#3a3a3f;
+  --line:#262626; --cell-empty:#141416; --accent:#0095f6; --danger:#ff5a68;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+  color-scheme:dark;
+}
+:root[data-theme="light"],:root[data-theme="dark"]{ color-scheme:dark; }
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){ color-scheme:dark; } }
+*{box-sizing:border-box}
+html{height:100%;background:#000;scroll-padding-top:env(safe-area-inset-top,0px);-webkit-text-size-adjust:100%}
+body{
+  margin:0 auto;height:100%;width:100%;max-width:520px;
+  display:flex;flex-direction:column;
+  background:var(--bg);color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP","Yu Gothic",system-ui,sans-serif;
+  overscroll-behavior:none;-webkit-tap-highlight-color:transparent;
+  user-select:none;-webkit-user-select:none;
+}
+button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;touch-action:manipulation}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* 上部バー */
+.top{flex:none;padding:8px 12px;display:flex;gap:8px;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);background:var(--bg)}
+.seg{display:inline-flex;background:var(--panel);border-radius:10px;padding:3px}
+.seg button{padding:6px 12px;border-radius:8px;font-size:14px;font-weight:600;color:var(--muted);min-height:34px;white-space:nowrap}
+.seg button.on{background:var(--panel3);color:var(--fg)}
+.chip{padding:7px 12px;border-radius:999px;background:var(--panel);font-size:13px;font-weight:600;color:var(--muted);min-height:34px;white-space:nowrap}
+.chip.on{background:var(--panel3);color:var(--fg)}
+.chips{display:flex;gap:6px}
+
+/* グリッド領域(スクロール不要で画面に収まる) */
+#scroller{flex:1;min-height:0;overflow:hidden;position:relative}
+.profile{padding:8px 16px 4px;opacity:.5}
+.prow{display:flex;align-items:center;gap:16px}
+.avatar{width:56px;height:56px;border-radius:50%;flex:none;background:linear-gradient(145deg,#46464c,#1c1c1e);border:2px solid #34343a}
+.stats{flex:1;display:flex;justify-content:space-around;text-align:center}
+.stats b{display:block;font-size:15px;font-weight:700}
+.stats span{font-size:11px;color:var(--muted)}
+.bar{height:8px;width:36%;border-radius:4px;background:#2b2b2f;margin-top:8px}
+.tabs{display:flex;justify-content:center;margin-top:6px;border-top:1px solid var(--line)}
+.tabs span{display:block;padding:7px 36px 6px;border-top:1px solid var(--fg);margin-top:-1px;opacity:.9}
+.tabs svg{width:20px;height:20px;display:block}
+body.nohdr .profile,body.nohdr .tabs{display:none}
+
+.gridwrap{position:relative;padding-top:2px}
+.grid{
+  position:relative;margin:0 auto;background:var(--bg);
+  touch-action:none;-webkit-touch-callout:none;
+}
+.cell{
+  position:absolute;left:0;top:0;overflow:hidden;background:var(--cell-empty);
+  transition:transform .26s cubic-bezier(.2,.8,.25,1);
+  will-change:transform;touch-action:none;cursor:grab;-webkit-touch-callout:none;
+}
+.grid.noanim .cell{transition:none}
+.cell img{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;-webkit-user-drag:none;transform-origin:50% 50%}
+.cell.empty img{display:none}
+.cell.empty{box-shadow:inset 0 0 0 .5px #2a2a2f;cursor:pointer}
+.plus{display:none;position:absolute;inset:0;align-items:center;justify-content:center;font-size:28px;color:#4a4a50;font-weight:300}
+.cell.empty .plus{display:flex}
+.num{
+  position:absolute;right:5px;bottom:5px;min-width:22px;padding:1px 7px;border-radius:999px;
+  background:rgba(0,0,0,.62);color:#fff;font-size:12px;font-weight:700;text-align:center;line-height:18px;
+  pointer-events:none;font-variant-numeric:tabular-nums;z-index:3;
+}
+.grid.hidenum .num{display:none}
+.grid.trim .cell{cursor:move}
+.grid.trim .cell.sel::after{content:"";position:absolute;inset:0;border:2px solid var(--accent);pointer-events:none;z-index:2}
+.cell.lifted{transition:none!important;z-index:30;box-shadow:0 16px 34px rgba(0,0,0,.75),0 0 0 1px rgba(255,255,255,.18);cursor:grabbing;border-radius:6px}
+.cell.settle{z-index:20}
+
+.emptymsg{
+  position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:14px;padding:24px;text-align:center;pointer-events:none;
+}
+.emptymsg p{margin:0;color:var(--muted);font-size:14px;line-height:1.8}
+.emptymsg button{pointer-events:auto;background:var(--accent);color:#fff;font-weight:700;padding:13px 22px;border-radius:12px;font-size:15px}
+
+/* 下部(親指ゾーン) */
+.bottom{flex:none;border-top:1px solid var(--line);background:var(--bg)}
+.toolsrow{height:52px;display:flex;align-items:center;gap:8px;padding:0 12px;justify-content:space-between}
+.toolsrow[hidden]{display:none}
+.toolsrow input[type=range]{flex:1;min-width:60px;height:32px;accent-color:var(--accent);touch-action:pan-x}
+.zv{width:38px;text-align:right;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--muted)}
+.mini{min-height:38px;padding:0 10px;border-radius:10px;background:var(--panel2);font-size:12px;font-weight:700;white-space:nowrap}
+.mini.danger{color:var(--danger)}
+.mini:disabled,input:disabled{opacity:.35}
+.btns{display:flex;gap:8px;padding:0 12px 10px}
+.btn{flex:1;min-height:54px;border-radius:14px;background:var(--panel2);font-size:15px;font-weight:700}
+.btn.primary{flex:1.7;background:var(--accent);color:#fff}
+.btn:disabled{opacity:.35;cursor:default}
+.btn:active:not(:disabled){filter:brightness(1.2)}
+
+/* トースト */
+.toast{
+  position:fixed;left:50%;bottom:calc(150px + env(safe-area-inset-bottom,0px));transform:translate(-50%,8px);
+  max-width:calc(100% - 32px);padding:11px 16px;border-radius:12px;background:rgba(48,48,52,.96);color:#fff;
+  font-size:13px;line-height:1.5;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:200;text-align:center
+}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+@media (prefers-reduced-motion: reduce){ .cell{transition-duration:.01s} }
+</style>
+</head>
+<body class="nohdr">
+
+<header class="top">
+  <div class="seg" id="ratioSeg" role="group" aria-label="マスの比率">
+    <button data-r="3:4">3:4</button><button data-r="1:1">1:1</button>
+  </div>
+  <div class="seg" id="editSeg" role="group" aria-label="操作の切り替え">
+    <button data-e="arrange">並べ替え</button><button data-e="trim">トリミング</button>
+  </div>
+</header>
+
+<main id="scroller">
+  <section class="profile" id="profile">
+    <div class="prow">
+      <div class="avatar"></div>
+      <div class="stats">
+        <div><b>12</b><span>投稿</span></div>
+        <div><b>—</b><span>フォロワー</span></div>
+        <div><b>—</b><span>フォロー中</span></div>
+      </div>
+    </div>
+    <div class="bar"></div>
+  </section>
+  <div class="tabs" id="tabs"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3.5" y="3.5" width="17" height="17"/><path d="M3.5 9.2h17M3.5 14.8h17M9.2 3.5v17M14.8 3.5v17"/></svg></span></div>
+
+  <div class="gridwrap">
+    <div class="grid" id="grid"></div>
+    <div class="emptymsg" id="emptyMsg">
+      <p>投稿予定の写真を12枚まとめて選んでください。<br>選んだ順に左上から並びます。<br>あとは指でドラッグして並べ替えできます。</p>
+      <button id="emptyPick">写真を12枚選ぶ</button>
+    </div>
+  </div>
+</main>
+
+<footer class="bottom">
+  <div class="toolsrow" id="toolsArrange">
+    <div class="seg" id="modeSeg" role="group" aria-label="動かし方">
+      <button data-m="swap">入れ替え</button><button data-m="insert">挿入</button>
+    </div>
+    <div class="chips">
+      <button class="chip" id="numChip">番号 ON</button>
+      <button class="chip" id="hdrChip">ヘッダー OFF</button>
+    </div>
+  </div>
+  <div class="toolsrow" id="toolsTrim" hidden>
+    <input type="range" id="zoom" min="100" max="400" step="1" value="100" aria-label="拡大">
+    <span class="zv" id="zv">1.0×</span>
+    <button class="mini" id="resetCrop">リセット</button>
+    <button class="mini" id="replaceBtn">差し替え</button>
+    <button class="mini danger" id="delBtn">削除</button>
+  </div>
+  <div class="btns">
+    <button class="btn primary" id="pickBtn">写真を12枚選ぶ</button>
+    <button class="btn" id="undoBtn" disabled>元に戻す</button>
+    <button class="btn" id="shuffleBtn">シャッフル</button>
+  </div>
+</footer>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<input type="file" id="pickMany" accept="image/*" multiple hidden>
+<input type="file" id="pickOne" accept="image/*" hidden>
+
+<script>
+(() => {
+  'use strict';
+
+  /* ===== 設定(比率はここ1か所で管理) =====
+     値は「縦 ÷ 横」。Instagramの現在のプロフィールグリッドは縦長の3:4。 */
+  const RATIO_H = { '3:4': 4 / 3, '1:1': 1 };
+  const DEFAULT_RATIO = '3:4';
+  const COLS = 3, ROWS = 4, N = COLS * ROWS;
+  const MAX_SIDE = 1200;
+  const MAX_ZOOM = 4;
+  const DRAG_START_PX = 5;
+
+  const $ = s => document.querySelector(s);
+  const grid = $('#grid'), scroller = $('#scroller');
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+  const state = { ratio: DEFAULT_RATIO, mode: 'swap', showNum: true, showHdr: false, edit: 'arrange' };
+  let order = [];                 // [{key, photo, z, x, y}] ×12 (左上=index0)
+  const photos = new Map();       // id -> {blob, url}
+  const cells = new Map();        // key -> element
+  let history = [];
+  let selKey = null;
+
+  const snap = () => order.map(o => ({ ...o }));
+  const entry = key => order.find(o => o.key === key);
+
+  /* ===== トースト ===== */
+  let toastTimer = 0;
+  function toast(msg, ms = 2800) {
+    const t = $('#toast');
+    t.textContent = msg; t.classList.add('show');
+    clearTimeout(toastTimer);
+    if (ms) toastTimer = setTimeout(() => t.classList.remove('show'), ms);
+  }
+  function hideToast() { clearTimeout(toastTimer); $('#toast').classList.remove('show'); }
+
+  /* ===== IndexedDB ===== */
+  let db = null, warned = false;
+  function warn() {
+    if (warned) return; warned = true;
+    toast('保存できませんでした。このまま使えますが、閉じると並びが消える場合があります', 5000);
+  }
+  function openDB() {
+    return new Promise((res, rej) => {
+      try {
+        const r = indexedDB.open('ig-grid-preview', 1);
+        r.onupgradeneeded = () => r.result.createObjectStore('kv');
+        r.onsuccess = () => res(r.result);
+        r.onerror = () => rej(r.error);
+        r.onblocked = () => rej(new Error('blocked'));
+      } catch (e) { rej(e); }
+    });
+  }
+  function idb(mode, fn) {
+    return new Promise((res, rej) => {
+      const tx = db.transaction('kv', mode);
+      const r = fn(tx.objectStore('kv'));
+      tx.oncomplete = () => res(r ? r.result : undefined);
+      tx.onerror = () => rej(tx.error);
+      tx.onabort = () => rej(tx.error);
+    });
+  }
+  async function dbPut(k, v) { if (!db) return; try { await idb('readwrite', s => s.put(v, k)); } catch (e) { warn(); } }
+  async function dbDel(k) { if (!db) return; try { await idb('readwrite', s => s.delete(k)); } catch (e) {} }
+  function save() {
+    dbPut('meta', {
+      ver: 2,
+      order: order.map(o => ({ key: o.key, photo: o.photo, z: o.z, x: o.x, y: o.y })),
+      ratio: state.ratio, mode: state.mode, showNum: state.showNum, showHdr: state.showHdr
+    });
+  }
+
+  /* ===== 画像処理(長辺1200pxに縮小・表示用のみ) ===== */
+  function loadImg(file) {
+    return new Promise((res, rej) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => { URL.revokeObjectURL(url); res(img); };
+      img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('load')); };
+      img.src = url;
+    });
+  }
+  async function processFile(file) {
+    let src;
+    try { src = await createImageBitmap(file, { imageOrientation: 'from-image' }); }
+    catch (e) { src = await loadImg(file); }
+    const w = src.width || src.naturalWidth, h = src.height || src.naturalHeight;
+    const s = Math.min(1, MAX_SIDE / Math.max(w, h));
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(w * s)); c.height = Math.max(1, Math.round(h * s));
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, c.width, c.height);
+    ctx.drawImage(src, 0, 0, c.width, c.height);
+    if (src.close) src.close();
+    const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.86));
+    if (!blob) throw new Error('blob');
+    return blob;
+  }
+  function addPhoto(blob) {
+    const id = 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    photos.set(id, { blob, url: URL.createObjectURL(blob) });
+    dbPut('photo:' + id, blob);
+    return id;
+  }
+  function resetCrop(o) { o.z = 1; o.x = 0; o.y = 0; }
+
+  /* ===== 描画 ===== */
+  function ensureEl(key) {
+    let el = cells.get(key);
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'cell'; el.dataset.key = key;
+      el.innerHTML = '<img alt="" draggable="false"><div class="plus">+</div><div class="num"></div>';
+      el.addEventListener('contextmenu', e => e.preventDefault());
+      grid.appendChild(el); cells.set(key, el);
+    }
+    return el;
+  }
+  function renderCrop(o) {
+    const el = cells.get(o.key); if (!el) return;
+    const img = el.querySelector('img');
+    img.style.transform = (o.z === 1 && !o.x && !o.y) ? '' : `translate(${o.x * 100}%,${o.y * 100}%) scale(${o.z})`;
+  }
+  function setCrop(o, z, x, y) {
+    z = clamp(z, 1, MAX_ZOOM);
+    const lim = (z - 1) / 2;
+    o.z = z; o.x = clamp(x, -lim, lim); o.y = clamp(y, -lim, lim);
+    renderCrop(o);
+    if (o.key === selKey) { $('#zoom').value = Math.round(o.z * 100); $('#zv').textContent = o.z.toFixed(1) + '×'; }
+  }
+  // 画面(特に高さ)に収まる幅を計算する
+  function fitWidth() {
+    const full = scroller.clientWidth;
+    let avail = scroller.clientHeight - 6;
+    if (state.showHdr) avail -= ($('#profile').offsetHeight + $('#tabs').offsetHeight);
+    const wFit = avail * COLS / (ROWS * RATIO_H[state.ratio]);
+    return Math.max(120, Math.floor(Math.min(full, wFit)));
+  }
+  function layout(arr, skipKey, animate = true) {
+    if (!animate) { grid.classList.add('noanim'); void grid.offsetWidth; }
+    const W = fitWidth();
+    const ch = W / COLS * RATIO_H[state.ratio];
+    grid.style.width = W + 'px';
+    grid.style.height = Math.round(ch * ROWS) + 'px';
+    arr.forEach((o, i) => {
+      const el = cells.get(o.key); if (!el) return;
+      const col = i % COLS, row = (i / COLS) | 0;
+      const x0 = Math.round(col * W / COLS), x1 = Math.round((col + 1) * W / COLS);
+      const y0 = Math.round(row * ch), y1 = Math.round((row + 1) * ch);
+      el.style.width = (x1 - x0) + 'px'; el.style.height = (y1 - y0) + 'px';
+      el.querySelector('.num').textContent = i + 1;
+      if (o.key !== skipKey) el.style.transform = `translate(${x0}px,${y0}px) scale(1)`;
+    });
+    if (!animate) { void grid.offsetWidth; grid.classList.remove('noanim'); }
+  }
+  function sync(animate = true) {
+    order.forEach(o => {
+      const el = ensureEl(o.key);
+      const img = el.querySelector('img');
+      const p = o.photo && photos.get(o.photo);
+      if (p) { if (img.getAttribute('src') !== p.url) img.src = p.url; el.classList.remove('empty'); }
+      else { img.removeAttribute('src'); el.classList.add('empty'); }
+      renderCrop(o);
+    });
+    layout(order, null, animate);
+    updateUI();
+  }
+  function updateSel() {
+    cells.forEach((el, k) => el.classList.toggle('sel', state.edit === 'trim' && k === selKey));
+  }
+  function updateUI() {
+    const count = order.filter(o => o.photo).length;
+    document.querySelectorAll('#ratioSeg button').forEach(b => b.classList.toggle('on', b.dataset.r === state.ratio));
+    document.querySelectorAll('#editSeg button').forEach(b => b.classList.toggle('on', b.dataset.e === state.edit));
+    document.querySelectorAll('#modeSeg button').forEach(b => b.classList.toggle('on', b.dataset.m === state.mode));
+    $('#numChip').textContent = '番号 ' + (state.showNum ? 'ON' : 'OFF');
+    $('#numChip').classList.toggle('on', state.showNum);
+    $('#hdrChip').textContent = 'ヘッダー ' + (state.showHdr ? 'ON' : 'OFF');
+    $('#hdrChip').classList.toggle('on', state.showHdr);
+    grid.classList.toggle('hidenum', !state.showNum);
+    grid.classList.toggle('trim', state.edit === 'trim');
+    document.body.classList.toggle('nohdr', !state.showHdr);
+    $('#toolsArrange').hidden = state.edit !== 'arrange';
+    $('#toolsTrim').hidden = state.edit !== 'trim';
+    $('#emptyMsg').style.display = count ? 'none' : 'flex';
+    $('#pickBtn').textContent = count ? '写真を選び直す' : '写真を12枚選ぶ';
+    $('#undoBtn').disabled = history.length === 0;
+    $('#shuffleBtn').disabled = count < 2;
+    const so = entry(selKey);
+    const can = !!(so && so.photo);
+    $('#zoom').disabled = !can; $('#resetCrop').disabled = !can; $('#delBtn').disabled = !can;
+    $('#replaceBtn').disabled = !so;
+    if (can) { $('#zoom').value = Math.round(so.z * 100); $('#zv').textContent = so.z.toFixed(1) + '×'; }
+    else { $('#zoom').value = 100; $('#zv').textContent = '1.0×'; }
+    updateSel();
+  }
+
+  /* ===== 履歴 ===== */
+  function pushHistory(s) {
+    history.push(s || snap());
+    if (history.length > 60) history.shift();
+    $('#undoBtn').disabled = false;
+  }
+  function undo() {
+    if (!history.length) return;
+    order = history.pop();
+    sync(); save();
+  }
+
+  /* ===== 並べ替えロジック ===== */
+  function arrange(arr, from, to, mode) {
+    const a = arr.slice();
+    if (from === to) return a;
+    if (mode === 'swap') { const t = a[from]; a[from] = a[to]; a[to] = t; }
+    else { const m = a.splice(from, 1)[0]; a.splice(to, 0, m); }
+    return a;
+  }
+
+  /* ===== 操作(Pointer Events) ===== */
+  let press = null, drag = null, raf = 0, tapKey = null, tapTimer = 0;
+  const ptrs = new Map();   // トリミング用: pointerId -> {x,y}
+  let tg = null;            // トリミング中のジェスチャ状態
+
+  grid.addEventListener('pointerdown', e => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    const el = e.target.closest('.cell');
+
+    if (state.edit === 'trim') {
+      if (tg) {   // 2本目の指 → ピンチ開始
+        if (e.pointerType !== 'mouse' && ptrs.size < 2) { ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY }); tgBase(); }
+        return;
+      }
+      if (!el) return;
+      const o = entry(el.dataset.key);
+      if (!o || !o.photo) return;
+      selKey = o.key; updateUI();
+      ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      tg = { key: o.key, pre: snap(), changed: false };
+      tgBase();
+      if (e.pointerType === 'mouse') e.preventDefault();
+      return;
+    }
+
+    if (press || !el) return;
+    const key = el.dataset.key;
+    const idx = order.findIndex(o => o.key === key);
+    if (idx < 0) return;
+    if (e.pointerType === 'mouse') e.preventDefault();
+    press = { id: e.pointerId, key, idx, sx: e.clientX, sy: e.clientY, x: e.clientX, y: e.clientY, moved: false };
+  });
+
+  function tgBase() {
+    const o = entry(tg.key), pts = Array.from(ptrs.values());
+    tg.z0 = o.z; tg.x0 = o.x; tg.y0 = o.y;
+    if (pts.length >= 2) {
+      tg.mid0 = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+      tg.d0 = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1;
+    } else { tg.mid0 = { x: pts[0].x, y: pts[0].y }; tg.d0 = 0; }
+  }
+  function tgMove() {
+    const o = entry(tg.key), el = cells.get(tg.key);
+    const pts = Array.from(ptrs.values());
+    let z = tg.z0, mid;
+    if (pts.length >= 2) {
+      const d = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      z = tg.z0 * d / tg.d0;
+      mid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+    } else mid = pts[0];
+    const x = tg.x0 + (mid.x - tg.mid0.x) / el.offsetWidth;
+    const y = tg.y0 + (mid.y - tg.mid0.y) / el.offsetHeight;
+    setCrop(o, z, x, y);
+    tg.changed = true;
+  }
+
+  window.addEventListener('pointermove', e => {
+    if (tg) {
+      if (!ptrs.has(e.pointerId)) return;
+      ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      tgMove(); e.preventDefault(); return;
+    }
+    if (!press || e.pointerId !== press.id) return;
+    press.x = e.clientX; press.y = e.clientY;
+    if (!drag && Math.hypot(press.x - press.sx, press.y - press.sy) > DRAG_START_PX) {
+      press.moved = true;
+      if (order[press.idx].photo) startDrag();
+    }
+    if (drag) { e.preventDefault(); moveDrag(); }
+  }, { passive: false });
+
+  function finishPress(e, cancel) {
+    if (!press || e.pointerId !== press.id) return;
+    if (drag) endDrag(!cancel);
+    else if (!cancel && !press.moved && !order[press.idx].photo) {
+      tapKey = press.key; clearTimeout(tapTimer);
+      tapTimer = setTimeout(() => { tapKey = null; }, 500);
+    }
+    press = null;
+  }
+  function onUp(e, cancel) {
+    if (tg && ptrs.has(e.pointerId)) {
+      ptrs.delete(e.pointerId);
+      if (ptrs.size === 0) {
+        if (tg.changed) { pushHistory(tg.pre); save(); }
+        tg = null;
+      } else tgBase();
+      return;
+    }
+    finishPress(e, cancel);
+  }
+  window.addEventListener('pointerup', e => onUp(e, false));
+  window.addEventListener('pointercancel', e => onUp(e, true));
+  document.addEventListener('touchmove', e => { if ((drag || tg) && e.cancelable) e.preventDefault(); }, { passive: false });
+  document.addEventListener('gesturestart', e => e.preventDefault());
+
+  // PC: ホイールで拡大(トリミング時)
+  let wheelPre = null, wheelTimer = 0;
+  grid.addEventListener('wheel', e => {
+    if (state.edit !== 'trim') return;
+    const el = e.target.closest('.cell'); if (!el) return;
+    const o = entry(el.dataset.key); if (!o || !o.photo) return;
+    e.preventDefault();
+    if (selKey !== o.key) { selKey = o.key; updateUI(); }
+    if (!wheelPre) wheelPre = snap();
+    setCrop(o, o.z * Math.exp(-e.deltaY * 0.0015), o.x, o.y);
+    clearTimeout(wheelTimer);
+    wheelTimer = setTimeout(() => { pushHistory(wheelPre); wheelPre = null; save(); }, 500);
+  }, { passive: false });
+
+  /* ----- 並べ替えドラッグ ----- */
+  function startDrag() {
+    const el = cells.get(press.key);
+    const r = el.getBoundingClientRect();
+    drag = { key: press.key, from: press.idx, to: press.idx, el, offX: press.x - r.left, offY: press.y - r.top, preview: order.slice() };
+    try { grid.setPointerCapture(press.id); } catch (e) {}
+    el.classList.add('lifted');
+    if (navigator.vibrate) navigator.vibrate(10);
+    moveDrag();
+  }
+  function moveDrag() {
+    if (!drag) return;
+    const gr = grid.getBoundingClientRect();
+    const W = gr.width, ch = W / COLS * RATIO_H[state.ratio];
+    const px = press.x - gr.left, py = press.y - gr.top;
+    drag.el.style.transform = `translate(${px - drag.offX}px,${py - drag.offY}px) scale(1.07)`;
+    const col = clamp(Math.floor(px / (W / COLS)), 0, COLS - 1);
+    const row = clamp(Math.floor(py / ch), 0, ROWS - 1);
+    const to = row * COLS + col;
+    if (to !== drag.to) {
+      drag.to = to;
+      drag.preview = arrange(order, drag.from, to, state.mode);
+      layout(drag.preview, drag.key);
+      if (navigator.vibrate) navigator.vibrate(5);
+    }
+  }
+  function endDrag(commit) {
+    const d = drag; drag = null;
+    d.el.classList.remove('lifted');
+    d.el.classList.add('settle');
+    setTimeout(() => d.el.classList.remove('settle'), 300);
+    if (commit && d.to !== d.from) { pushHistory(); order = d.preview; save(); }
+    layout(order, null);
+    updateUI();
+  }
+
+  /* ===== 空きマスのタップ → 写真を追加 ===== */
+  let pickTarget = null;
+  grid.addEventListener('click', () => {
+    if (!tapKey) return;
+    pickTarget = tapKey; tapKey = null;
+    $('#pickOne').click();
+  });
+
+  /* ===== 写真選択 ===== */
+  const openPicker = () => $('#pickMany').click();
+  $('#pickBtn').addEventListener('click', openPicker);
+  $('#emptyPick').addEventListener('click', openPicker);
+
+  $('#pickMany').addEventListener('change', async e => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (!files.length) return;
+    const use = files.slice(0, N);
+    const ids = []; let fail = 0;
+    for (let i = 0; i < use.length; i++) {
+      toast(`読み込み中… ${i + 1} / ${use.length}`, 0);
+      try { ids.push(addPhoto(await processFile(use[i]))); } catch (err) { fail++; }
+    }
+    if (!ids.length) { toast('写真を読み込めませんでした。別の写真でもう一度お試しください', 4000); return; }
+    pushHistory();
+    order.forEach((o, i) => { o.photo = ids[i] || null; resetCrop(o); });
+    sync(); save();
+    if (files.length > N) toast(`${files.length}枚選ばれたため、先頭の${N}枚を並べました`, 3500);
+    else if (ids.length < N) toast(`${ids.length}枚を並べました。あと${N - ids.length}枚。空きマスをタップで追加できます`, 4000);
+    else if (fail) toast(`${fail}枚は読み込めませんでした`, 3500);
+    else hideToast();
+  });
+
+  $('#pickOne').addEventListener('change', async e => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = '';
+    const key = pickTarget; pickTarget = null;
+    if (!f || !key) return;
+    try {
+      toast('読み込み中…', 0);
+      const id = addPhoto(await processFile(f));
+      const o = entry(key);
+      if (!o) return;
+      pushHistory(); o.photo = id; resetCrop(o); sync(); save(); hideToast();
+    } catch (err) { toast('写真を読み込めませんでした', 3500); }
+  });
+
+  /* ===== ボタン ===== */
+  $('#undoBtn').addEventListener('click', undo);
+  $('#shuffleBtn').addEventListener('click', () => {
+    pushHistory();
+    const a = order.slice();
+    for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+    order = a; sync(); save();
+  });
+  $('#ratioSeg').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    state.ratio = b.dataset.r; layout(order, null, false); updateUI(); save();
+  });
+  $('#editSeg').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    state.edit = b.dataset.e;
+    press = null; tg = null; ptrs.clear();
+    if (state.edit === 'trim') {
+      const so = entry(selKey);
+      if (!so || !so.photo) { const f = order.find(o => o.photo); selKey = f ? f.key : null; }
+      toast('写真をドラッグで位置、2本指(またはスライダー)で拡大できます', 3500);
+    }
+    updateUI();
+  });
+  $('#modeSeg').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    state.mode = b.dataset.m; updateUI(); save();
+    toast(state.mode === 'swap' ? '入れ替え:2枚の位置が入れ替わります' : '挿入:離した位置に入り、他の写真が詰まります', 2200);
+  });
+  $('#numChip').addEventListener('click', () => {
+    state.showNum = !state.showNum; updateUI(); save();
+    if (state.showNum) toast('番号は投稿する順番です(12が最初、1が最後)', 3000);
+  });
+  $('#hdrChip').addEventListener('click', () => {
+    state.showHdr = !state.showHdr; updateUI(); save();
+    requestAnimationFrame(() => layout(order, null, false));
+  });
+
+  // トリミング用ボタン
+  let sliderPre = null;
+  $('#zoom').addEventListener('input', e => {
+    const o = entry(selKey); if (!o || !o.photo) return;
+    if (!sliderPre) sliderPre = snap();
+    setCrop(o, e.target.value / 100, o.x, o.y);
+  });
+  $('#zoom').addEventListener('change', () => {
+    if (sliderPre) { pushHistory(sliderPre); sliderPre = null; save(); }
+  });
+  $('#resetCrop').addEventListener('click', () => {
+    const o = entry(selKey); if (!o || !o.photo) return;
+    if (o.z === 1 && !o.x && !o.y) return;
+    pushHistory(); setCrop(o, 1, 0, 0); save();
+  });
+  $('#replaceBtn').addEventListener('click', () => {
+    if (!selKey) return;
+    pickTarget = selKey; $('#pickOne').click();
+  });
+  $('#delBtn').addEventListener('click', () => {
+    const o = entry(selKey); if (!o || !o.photo) return;
+    pushHistory(); o.photo = null; resetCrop(o); sync(); save();
+    toast('削除しました(元に戻せます)');
+  });
+
+  if (window.ResizeObserver) new ResizeObserver(() => { if (!drag) layout(order, null, false); }).observe(scroller);
+  window.addEventListener('resize', () => { if (!drag) layout(order, null, false); });
+  window.addEventListener('orientationchange', () => setTimeout(() => { if (!drag) layout(order, null, false); }, 250));
+
+  /* ===== 初期化・復元 ===== */
+  async function init() {
+    for (let i = 0; i < N; i++) order.push({ key: 'c' + i, photo: null, z: 1, x: 0, y: 0 });
+    try {
+      db = await openDB();
+      try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
+      const meta = await idb('readonly', s => s.get('meta'));
+      if (meta) {
+        if (RATIO_H[meta.ratio]) state.ratio = meta.ratio;
+        if (meta.mode === 'swap' || meta.mode === 'insert') state.mode = meta.mode;
+        if (typeof meta.showNum === 'boolean') state.showNum = meta.showNum;
+        if (meta.ver === 2 && typeof meta.showHdr === 'boolean') state.showHdr = meta.showHdr;
+        const keys = new Set(order.map(o => o.key));
+        if (Array.isArray(meta.order) && meta.order.length === N &&
+            meta.order.every(o => keys.has(o.key)) && new Set(meta.order.map(o => o.key)).size === N) {
+          const restored = meta.order.map(o => ({
+            key: o.key, photo: o.photo || null,
+            z: clamp(+o.z || 1, 1, MAX_ZOOM), x: +o.x || 0, y: +o.y || 0
+          }));
+          for (const o of restored) {
+            if (!o.photo) { resetCrop(o); continue; }
+            try {
+              const blob = await idb('readonly', s => s.get('photo:' + o.photo));
+              if (blob) photos.set(o.photo, { blob, url: URL.createObjectURL(blob) });
+              else { o.photo = null; resetCrop(o); }
+            } catch (e) { o.photo = null; resetCrop(o); }
+          }
+          order = restored;
+        }
+        // 使われていない写真データの掃除
+        try {
+          const all = await idb('readonly', s => s.getAllKeys());
+          const used = new Set(order.map(o => o.photo).filter(Boolean));
+          for (const k of all) if (typeof k === 'string' && k.startsWith('photo:') && !used.has(k.slice(6))) dbDel(k);
+        } catch (e) {}
+      }
+    } catch (e) {
+      db = null; warn();
+    }
+    sync(false);
+  }
+  init();
+})();
+</script>
+</body>
+</html>
